@@ -2,80 +2,67 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Configuración de página
-st.set_page_config(page_title="Control de Órdenes", layout="wide")
+st.set_page_config(page_title="Filtro Solicita Repuestos", layout="wide")
 
-st.title("📊 Monitor de Repuestos (Filtro Total)")
+st.title("🛠️ Solo Solicita Repuestos")
+st.markdown("Buscando todos los registros que contengan la palabra **'Solicita'** en el Estado.")
 
 uploaded_file = st.file_uploader("Sube tu archivo ordenes.csv", type=["csv"])
 
 if uploaded_file is not None:
     try:
-        # 1. Leer con separador punto y coma
+        # 1. Leer archivo con punto y coma
         df = pd.read_csv(uploaded_file, sep=';', engine='python')
         
-        # 2. Limpieza total de nombres de columnas
+        # 2. Limpiar nombres de columnas
         df.columns = df.columns.str.strip()
         
-        # 3. Limpieza de datos en las celdas (Elimina espacios invisibles y estandariza texto)
-        for col in ['Estado', 'Técnico', 'Repuestos']:
+        # 3. Limpiar datos de las columnas clave
+        for col in ['Estado', 'Técnico']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
 
-        # --- APLICACIÓN DE REGLAS ---
+        # --- FILTRADO FLEXIBLE ---
+        # Buscamos la palabra "SOLICITA" en cualquier parte del texto del Estado
+        # Y seguimos excluyendo a los técnicos que empiezan con "GO"
         
-        # Regla: Solicita Repuestos (Sin restricciones de columna Repuestos)
-        # Usamos .upper() para evitar fallos por mayúsculas/minúsculas
-        cond_solicita = (df['Estado'].str.upper() == "SOLICITA REPUESTOS")
+        cond_solicita = df['Estado'].str.contains('SOLICITA', case=False, na=False)
+        cond_no_go = ~df['Técnico'].str.upper().str.startswith('GO', na=False)
         
-        # Regla: Proceso/Repuestos (Debe tener algo escrito en columna Repuestos)
-        cond_proceso = (
-            (df['Estado'].str.upper() == "PROCESO/REPUESTOS") & 
-            (df['Repuestos'].str.upper() != "NAN") & 
-            (df['Repuestos'] != "") & 
-            (df['Repuestos'] != "0")
-        )
-        
-        # Regla: Excluir técnicos que empiezan con "GO"
-        cond_no_go = ~df['Técnico'].str.upper().str.startswith('GO')
-        
-        # Filtrado final
-        df_filtrado = df[(cond_solicita | cond_proceso) & cond_no_go].copy()
+        df_filtrado = df[cond_solicita & cond_no_go].copy()
         
         if not df_filtrado.empty:
-            st.success(f"✅ Se han filtrado {len(df_filtrado)} órdenes correctamente.")
+            st.success(f"✅ ¡Éxito! Se encontraron {len(df_filtrado)} órdenes en estado 'Solicita'.")
             
-            # Gráfico de Barras por Técnico
+            # Gráfico de barras
             resumen = df_filtrado.groupby('Técnico')['#Orden'].count().sort_values(ascending=False)
             
             col1, col2 = st.columns([2, 1])
             with col1:
-                st.subheader("Órdenes por Técnico")
                 fig, ax = plt.subplots(figsize=(10, 5))
-                resumen.plot(kind='bar', ax=ax, color='#3498db', edgecolor='black')
+                resumen.plot(kind='bar', ax=ax, color='#9b59b6')
                 ax.set_ylabel("Cant. Órdenes")
-                plt.xticks(rotation=45, ha='right')
-                # Etiquetas sobre las barras
                 for i, v in enumerate(resumen):
                     ax.text(i, v + 0.1, str(v), ha='center', fontweight='bold')
                 st.pyplot(fig)
             
             with col2:
-                st.subheader("Resumen Numérico")
+                st.write("**Conteo por Técnico:**")
                 st.table(resumen)
             
             st.divider()
-            # Tabla Detallada con Serie/Artículo
-            st.subheader("📋 Detalle de Órdenes")
-            cols_finales = ['#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Serie/Artículo', 'Repuestos', 'Producto']
-            # Mostrar solo las columnas que existan en el archivo
-            columnas_visibles = [c for c in cols_finales if c in df_filtrado.columns]
-            st.dataframe(df_filtrado[columnas_visibles], use_container_width=True)
+            # Mostrar tabla con Serie/Artículo
+            st.subheader("📋 Listado Detallado")
+            cols_ver = ['#Orden', 'Técnico', 'Estado', 'Serie/Artículo', 'Producto', 'Repuestos']
+            cols_finales = [c for c in cols_ver if c in df.columns]
+            st.dataframe(df_filtrado[cols_finales], use_container_width=True)
             
         else:
-            st.warning("No se encontraron datos. Verifica que el archivo tenga los estados 'Solicita Repuestos' o 'Proceso/Repuestos'.")
-            
+            st.warning("No se encontraron coincidencias. Por favor, revisa que la columna 'Estado' contenga la palabra 'Solicita'.")
+            # Esto te ayudará a ver qué nombres de columnas detectó el programa realmente
+            with st.expander("Ver nombres de columnas detectadas"):
+                st.write(list(df.columns))
+                st.write("Muestra de estados encontrados:", df['Estado'].unique())
+
     except Exception as e:
-        st.error(f"Error al leer el archivo: {e}")
-else:
-    st.info("Sube el archivo CSV para ver los resultados.")
+        st.error(f"Error al procesar: {e}")
