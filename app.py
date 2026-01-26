@@ -2,58 +2,64 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Configuración estética
-st.set_page_config(page_title="Control de Repuestos", layout="wide")
+# Configuración de la interfaz
+st.set_page_config(page_title="Filtro de Órdenes y Repuestos", layout="wide")
 
-st.title("🛠️ Monitor de Órdenes y Repuestos")
-st.markdown("Filtro aplicado: **Estados específicos** y **Con Repuestos registrados**.")
+st.title("📊 Control de Repuestos por Técnico")
+st.markdown("Filtros: Estados **'Proceso/Repuestos'** y **'Solicita Repuestos'** + Columna **'Repuestos'** con datos.")
 
-# 1. Carga de Datos
-uploaded_file = st.file_uploader("Subir archivo CSV (ordenes.csv)", type=["csv"])
+# Cargador de archivos
+uploaded_file = st.file_uploader("Sube tu archivo CSV (ordenes.csv)", type=["csv"])
 
 if uploaded_file:
-    # Leer el archivo con codificación estándar
+    # Leer el archivo (usamos error_bad_lines=False por si hay comas extra en observaciones)
     df = pd.read_csv(uploaded_file)
     
-    # --- PROCESAMIENTO DE DATOS ---
+    # 1. Limpieza de nombres de columnas (quitar espacios en blanco)
+    df.columns = df.columns.str.strip()
     
-    # 2. Filtro por Estados específicos
-    estados_objetivo = ["Proceso/Repuestos", "Solicita Repuestos"]
-    df_filtrado = df[df['Estado'].isin(estados_objetivo)].copy()
+    # 2. Definir los parámetros de filtro
+    estados_validos = ["Proceso/Repuestos", "Solicita Repuestos"]
     
-    # 3. Filtro: Columna Repuestos NO vacía (quitamos nulos y espacios en blanco)
-    df_filtrado = df_filtrado.dropna(subset=['Repuestos'])
-    df_filtrado = df_filtrado[df_filtrado['Repuestos'].astype(str).str.strip() != ""]
-    
-    if not df_filtrado.empty:
-        # --- VISUALIZACIÓN ---
-        col1, col2 = st.columns([1, 2])
-        
-        with col1:
-            st.metric("Total Órdenes Filtradas", len(df_filtrado))
-            # Agrupar por Técnico
-            resumen_tecnico = df_filtrado.groupby('Técnico')['#Orden'].count().sort_values(ascending=False)
-            st.write("**Conteo por Técnico:**")
-            st.table(resumen_tecnico)
+    # Aplicar Filtros:
+    # - Que el estado esté en la lista
+    # - Que la columna Repuestos no sea nula ni esté vacía
+    mask = (df['Estado'].isin(estados_validos)) & (df['Repuestos'].notna()) & (df['Repuestos'].astype(str).str.strip() != "")
+    df_filtrado = df[mask].copy()
 
-        with col2:
-            st.subheader("Órdenes por Técnico")
-            fig, ax = plt.subplots(figsize=(8, 4))
-            resumen_tecnico.plot(kind='bar', ax=ax, color='skyblue', edgecolor='navy')
+    if not df_filtrado.empty:
+        # Agrupar por Técnico y contar número de órdenes
+        conteo_tecnicos = df_filtrado.groupby('Técnico')['#Orden'].count().sort_values(ascending=False)
+
+        # Mostrar métricas rápidas
+        st.metric("Total Órdenes Encontradas", len(df_filtrado))
+
+        # Crear dos columnas para visualización
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            st.subheader("Gráfico de Carga por Técnico")
+            fig, ax = plt.subplots()
+            conteo_tecnicos.plot(kind='bar', ax=ax, color='#1f77b4', edgecolor='black')
             ax.set_ylabel("Cantidad de Órdenes")
-            ax.set_xlabel("Técnico")
-            plt.xticks(rotation=45)
-            # Etiquetas de datos
-            for i, v in enumerate(resumen_tecnico):
-                ax.text(i, v + 0.1, str(v), ha='center')
+            ax.set_xlabel("Técnicos")
+            plt.xticks(rotation=45, ha='right')
+            
+            # Añadir etiquetas de número sobre las barras
+            for i, v in enumerate(conteo_tecnicos):
+                ax.text(i, v + 0.1, str(v), ha='center', fontweight='bold')
+            
             st.pyplot(fig)
 
-        # Mostrar tabla detallada al final
+        with col2:
+            st.subheader("Resumen Numérico")
+            st.write(conteo_tecnicos)
+
+        # Mostrar la tabla de datos completa al final
         st.divider()
-        st.subheader("Detalle de Órdenes Seleccionadas")
-        st.dataframe(df_filtrado[['#Orden', 'Técnico', 'Estado', 'Repuestos', 'Producto']], use_container_width=True)
-        
+        st.subheader("📋 Detalle de Órdenes Filtradas")
+        st.dataframe(df_filtrado[['#Orden', 'Técnico', 'Estado', 'Repuestos']], use_container_width=True)
     else:
-        st.warning("No hay datos que coincidan con los filtros (Estado 'Proceso/Repuestos' o 'Solicita Repuestos' con la columna 'Repuestos' llena).")
+        st.warning("No se encontraron registros que cumplan con los filtros: Estados específicos y repuestos no vacíos.")
 else:
-    st.info("Esperando archivo CSV...")
+    st.info("Por favor, sube el archivo CSV para procesar los datos.")
