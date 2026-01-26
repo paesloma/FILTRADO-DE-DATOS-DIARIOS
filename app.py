@@ -2,10 +2,9 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Filtro Solicita Repuestos", layout="wide")
+st.set_page_config(page_title="Reporte por Talleres", layout="wide")
 
-st.title("🛠️ Solo Solicita Repuestos")
-st.markdown("Buscando todos los registros que contengan la palabra **'Solicita'** en el Estado.")
+st.title("🧑‍🔧 Órdenes por Taller (Solicita Repuestos)")
 
 uploaded_file = st.file_uploader("Sube tu archivo ordenes.csv", type=["csv"])
 
@@ -14,55 +13,52 @@ if uploaded_file is not None:
         # 1. Leer archivo con punto y coma
         df = pd.read_csv(uploaded_file, sep=';', engine='python')
         
-        # 2. Limpiar nombres de columnas
+        # 2. Limpieza de nombres de columnas y datos
         df.columns = df.columns.str.strip()
-        
-        # 3. Limpiar datos de las columnas clave
         for col in ['Estado', 'Técnico']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
 
-        # --- FILTRADO FLEXIBLE ---
-        # Buscamos la palabra "SOLICITA" en cualquier parte del texto del Estado
-        # Y seguimos excluyendo a los técnicos que empiezan con "GO"
-        
-        cond_solicita = df['Estado'].str.contains('SOLICITA', case=False, na=False)
+        # --- FILTRADO ---
+        # Buscamos "Solicita" y excluimos técnicos "GO"
+        cond_solicita = df['Estado'].str.contains('Solicita', case=False, na=False)
         cond_no_go = ~df['Técnico'].str.upper().str.startswith('GO', na=False)
         
         df_filtrado = df[cond_solicita & cond_no_go].copy()
         
         if not df_filtrado.empty:
-            st.success(f"✅ ¡Éxito! Se encontraron {len(df_filtrado)} órdenes en estado 'Solicita'.")
+            # Métricas generales
+            st.metric("Total General de Órdenes", len(df_filtrado))
             
-            # Gráfico de barras
-            resumen = df_filtrado.groupby('Técnico')['#Orden'].count().sort_values(ascending=False)
-            
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                fig, ax = plt.subplots(figsize=(10, 5))
-                resumen.plot(kind='bar', ax=ax, color='#9b59b6')
-                ax.set_ylabel("Cant. Órdenes")
-                for i, v in enumerate(resumen):
-                    ax.text(i, v + 0.1, str(v), ha='center', fontweight='bold')
-                st.pyplot(fig)
-            
-            with col2:
-                st.write("**Conteo por Técnico:**")
-                st.table(resumen)
-            
+            # --- SECCIÓN DE LISTAS POR TALLER ---
             st.divider()
-            # Mostrar tabla con Serie/Artículo
-            st.subheader("📋 Listado Detallado")
-            cols_ver = ['#Orden', 'Técnico', 'Estado', 'Serie/Artículo', 'Producto', 'Repuestos']
-            cols_finales = [c for c in cols_ver if c in df.columns]
-            st.dataframe(df_filtrado[cols_finales], use_container_width=True)
+            st.header("📋 Listas por Servicio Técnico (ST)")
+            
+            # Obtenemos la lista única de técnicos/talleres
+            talleres = sorted(df_filtrado['Técnico'].unique())
+            
+            # Crear pestañas o secciones por cada taller
+            for taller in talleres:
+                with st.expander(f"📍 Taller / ST: {taller} ({len(df_filtrado[df_filtrado['Técnico'] == taller])} órdenes)"):
+                    # Filtrar datos del taller actual
+                    datos_taller = df_filtrado[df_filtrado['Técnico'] == taller]
+                    
+                    # Columnas importantes para la lista pequeña
+                    cols_lista = ['#Orden', 'Fecha', 'Cliente', 'Serie/Artículo', 'Producto']
+                    cols_finales = [c for c in cols_lista if c in datos_taller.columns]
+                    
+                    st.table(datos_taller[cols_finales])
+            
+            # --- GRÁFICO RESUMEN AL FINAL ---
+            st.divider()
+            st.subheader("📈 Resumen Comparativo de Carga")
+            resumen = df_filtrado.groupby('Técnico')['#Orden'].count().sort_values(ascending=False)
+            fig, ax = plt.subplots(figsize=(10, 4))
+            resumen.plot(kind='bar', ax=ax, color='#2ecc71')
+            st.pyplot(fig)
             
         else:
-            st.warning("No se encontraron coincidencias. Por favor, revisa que la columna 'Estado' contenga la palabra 'Solicita'.")
-            # Esto te ayudará a ver qué nombres de columnas detectó el programa realmente
-            with st.expander("Ver nombres de columnas detectadas"):
-                st.write(list(df.columns))
-                st.write("Muestra de estados encontrados:", df['Estado'].unique())
+            st.warning("No se encontraron órdenes en estado 'Solicita' para técnicos válidos.")
 
     except Exception as e:
         st.error(f"Error al procesar: {e}")
