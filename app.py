@@ -5,21 +5,20 @@ from io import BytesIO
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # Configuración de la interfaz
-st.set_page_config(page_title="Gestión de Repuestos - Listado Completo", layout="wide")
+st.set_page_config(page_title="Gestión de Repuestos - Filtrado", layout="wide")
 
-st.title("📊 Reporte de Repuestos (Todos los Técnicos)")
+st.title("📊 Reporte de Repuestos (Técnicos Autorizados)")
 st.markdown("""
-**Reglas del Reporte:**
-* ✅ **Estado 'Solicita Repuestos'**: Incluidos todos.
-* ✅ **Estado 'Proceso/Repuestos'**: Incluidos solo si la columna 'Repuestos' tiene información.
-* 👥 **Técnicos**: Se muestran todos los que existan en el archivo subido.
+**Filtros de Exclusión Aplicados:**
+* 🚫 **Prefijos:** No se muestran técnicos que inicien con 'GO'.
+* 🚫 **Específicos:** Se excluyen STDIGICENT, STBMDIGI, TCLCUE y TCLCUENC.
 """)
 
 uploaded_file = st.file_uploader("Sube tu archivo (.xls, .xlsx, .csv)", type=["xls", "xlsx", "csv"])
 
 if uploaded_file is not None:
     try:
-        # 1. Lectura de archivos
+        # 1. Lectura inteligente
         if uploaded_file.name.endswith(('.xls', '.xlsx')):
             df = pd.read_excel(uploaded_file)
         else:
@@ -31,87 +30,80 @@ if uploaded_file is not None:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
 
-        # --- LÓGICA DE FILTRADO ÚNICAMENTE POR ESTADO ---
+        # --- LÓGICA DE FILTRADO ---
         
-        # Filtro para "Solicita Repuestos" (Flexible a mayúsculas/minúsculas)
+        # Estados
         cond_solicita = df['Estado'].str.contains('Solicita', case=False, na=False)
-        
-        # Filtro para "Proceso/Repuestos" que SÍ tengan datos escritos
         es_proceso = df['Estado'].str.contains('Proceso/Repuestos', case=False, na=False)
-        tiene_datos = (
-            (df['Repuestos'].str.lower() != 'nan') & 
-            (df['Repuestos'] != '') & 
-            (df['Repuestos'] != '0')
-        )
-        cond_proceso_valido = es_proceso & tiene_datos
+        tiene_datos = (df['Repuestos'].str.lower() != 'nan') & (df['Repuestos'] != '') & (df['Repuestos'] != '0')
+        cond_estado = cond_solicita | (es_proceso & tiene_datos)
+
+        # Exclusiones de técnicos
+        cond_no_go = ~df['Técnico'].str.upper().str.startswith('GO', na=False)
+        lista_negra = ['STDIGICENT', 'STBMDIGI', 'TCLCUE', 'TCLCUENC']
+        cond_no_lista = ~df['Técnico'].str.upper().isin([e.upper() for e in lista_negra])
         
-        # Aplicamos el filtro y ordenamos alfabéticamente por técnico
-        df_filtrado = df[cond_solicita | cond_proceso_valido].copy()
+        # Aplicar filtros
+        df_filtrado = df[cond_estado & cond_no_go & cond_no_lista].copy()
         df_filtrado = df_filtrado.sort_values(by='Técnico')
 
-        # Definición de columnas finales para el Excel y la Web
+        # Columnas específicas
         columnas_finales = ['#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Serie/Artículo', 'Repuestos', 'Producto']
-        columnas_disponibles = [c for c in columnas_finales if c in df_filtrado.columns]
-        df_export = df_filtrado[columnas_disponibles]
+        cols_disp = [c for c in columnas_finales if c in df_filtrado.columns]
+        df_export = df_filtrado[cols_disp]
 
         if not df_filtrado.empty:
-            st.success(f"✅ Se han procesado {len(df_filtrado)} órdenes sin exclusiones de técnicos.")
+            st.success(f"✅ Se han filtrado {len(df_filtrado)} registros (Exclusiones aplicadas).")
 
-            # --- GENERACIÓN DE EXCEL ESTILIZADO CON SEPARADORES ---
+            # --- EXCEL ESTILIZADO ---
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_export.to_excel(writer, index=False, sheet_name='Reporte')
                 ws = writer.sheets['Reporte']
                 
-                # Estilos para el Excel
-                header_style = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid') # Azul
-                sep_style = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')    # Gris
+                header_style = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+                sep_style = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')
                 white_font = Font(color='FFFFFF', bold=True)
                 bold_font = Font(bold=True)
                 border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
 
-                # Aplicar estilo al encabezado
                 for cell in ws[1]:
                     cell.fill = header_style
                     cell.font = white_font
                     cell.border = border
-                    cell.alignment = Alignment(horizontal='center')
 
-                # Inserción de filas de separación por taller
-                idx_tech = columnas_disponibles.index('Técnico') + 1
+                # Insertar filas separadoras
+                idx_tech = cols_disp.index('Técnico') + 1
                 row = 2
                 while row <= ws.max_row:
                     curr_tech = ws.cell(row=row, column=idx_tech).value
                     prev_tech = ws.cell(row=row-1, column=idx_tech).value if row > 2 else None
-                    
                     if prev_tech and curr_tech != prev_tech and prev_tech != "Técnico":
                         ws.insert_rows(row)
-                        for col in range(1, len(columnas_disponibles) + 1):
+                        for col in range(1, len(cols_disp) + 1):
                             cell = ws.cell(row=row, column=col)
                             cell.fill = sep_style
                             cell.border = border
                             if col == idx_tech:
-                                cell.value = f"--- SECCIÓN: {curr_tech} ---"
+                                cell.value = f"SECCIÓN: {curr_tech}"
                                 cell.font = bold_font
                         row += 1
                     row += 1
 
             st.download_button(
-                label="📥 Descargar Reporte Completo (Excel)",
+                label="📥 Descargar Excel Filtrado",
                 data=output.getvalue(),
-                file_name="Reporte_Final_Sin_Exclusiones.xlsx",
+                file_name="Reporte_Filtrado_Técnicos.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
             # --- VISTA PREVIA WEB ---
             st.divider()
             for taller in sorted(df_filtrado['Técnico'].unique()):
-                datos_taller = df_filtrado[df_filtrado['Técnico'] == taller]
-                with st.expander(f"📍 Taller: {taller} ({len(datos_taller)} órdenes)"):
-                    st.dataframe(datos_taller[columnas_disponibles], hide_index=True, use_container_width=True)
-            
+                with st.expander(f"📍 Taller: {taller}"):
+                    st.dataframe(df_filtrado[df_filtrado['Técnico'] == taller][cols_disp], hide_index=True)
         else:
-            st.warning("No se encontraron órdenes con los estados 'Solicita' o 'Proceso' (con datos).")
+            st.warning("No hay registros que coincidan tras las exclusiones.")
 
     except Exception as e:
-        st.error(f"Error técnico al procesar el archivo: {e}")
+        st.error(f"Error: {e}")
