@@ -6,7 +6,7 @@ from io import BytesIO
 # Configuración de la interfaz
 st.set_page_config(page_title="Gestión de Repuestos", layout="wide")
 
-st.title("🛠️ Generador de Reportes Estilizados")
+st.title("🛠️ ARCHIVOS PENDIENTES PARA ENVIO ")
 
 uploaded_file = st.file_uploader("Sube tu archivo (.xls, .xlsx, .csv)", type=["xls", "xlsx", "csv"])
 
@@ -71,7 +71,7 @@ if uploaded_file is not None:
                     cell.border = thin_border
 
             st.download_button(
-                label="📥 Descargar Excel Agrupado y con Color",
+                label="📥 DESCARGAR LISTA PENDIENTE",
                 data=output.getvalue(),
                 file_name="Reporte_Repuestos_Colores.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
