@@ -5,7 +5,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 st.set_page_config(page_title="Gestión de Repuestos", layout="wide")
 
-st.title("📊 Reporte con Separadores de Taller")
+st.title("📊 Reporte con Contador por Taller")
 
 uploaded_file = st.file_uploader("Sube tu archivo (.xls, .xlsx, .csv)", type=["xls", "xlsx", "csv"])
 
@@ -20,14 +20,12 @@ if uploaded_file is not None:
         df.columns = df.columns.str.strip()
         
         # --- FILTRADO ESTRICTO ---
-        # Estados válidos
         cond_solicita = df['Estado'].str.contains('Solicita', case=False, na=False)
         es_proceso = df['Estado'].str.contains('Proceso/Repuestos', case=False, na=False)
-        tiene_datos = df['Repuestos'].astype(str).str.len() > 2 # Verifica que no esté vacío
+        tiene_datos = df['Repuestos'].astype(str).str.len() > 2 
         cond_estado = cond_solicita | (es_proceso & tiene_datos)
 
-        # Exclusión de técnicos (GO y específicos)
-        # Usamos un patrón que detecte "GO" al inicio de cualquier palabra
+        # Exclusión definitiva de GO, STDIGICENT, STBMDIGI, TCLCUE, TCLCUENC
         patron_excluir = r'^GO|STDIGICENT|STBMDIGI|TCLCUE|TCLCUENC'
         df_filtrado = df[cond_estado].copy()
         df_filtrado = df_filtrado[~df_filtrado['Técnico'].str.upper().str.contains(patron_excluir, na=False)]
@@ -40,7 +38,7 @@ if uploaded_file is not None:
         df_export = df_filtrado[cols_disp]
 
         if not df_filtrado.empty:
-            st.success(f"✅ Reporte generado: {len(df_filtrado)} órdenes.")
+            st.success(f"✅ Reporte listo: {len(df_filtrado)} órdenes encontradas.")
 
             # --- GENERACIÓN DE EXCEL ---
             output = BytesIO()
@@ -49,8 +47,8 @@ if uploaded_file is not None:
                 ws = writer.sheets['Reporte']
                 
                 # Estilos
-                header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid') # Azul
-                sep_fill = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')    # Gris
+                header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid') 
+                sep_fill = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')    
                 white_font = Font(color='FFFFFF', bold=True)
                 black_bold = Font(color='000000', bold=True)
                 border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
@@ -61,7 +59,7 @@ if uploaded_file is not None:
                     cell.alignment = Alignment(horizontal='center')
                     cell.border = border
 
-                # Lógica para insertar FILA con NOMBRE DEL TALLER
+                # Lógica para insertar FILA con NOMBRE y CONTEO
                 idx_tech = cols_disp.index('Técnico') + 1
                 row = 2
                 while row <= ws.max_row:
@@ -69,27 +67,30 @@ if uploaded_file is not None:
                     prev_tech = ws.cell(row=row-1, column=idx_tech).value if row > 2 else None
                     
                     if prev_tech and curr_tech != prev_tech and prev_tech != "Técnico":
+                        # Contar cuántas órdenes tiene este nuevo taller
+                        conteo = len(df_filtrado[df_filtrado['Técnico'] == curr_tech])
+                        
                         ws.insert_rows(row)
-                        # Pintar y escribir en la fila separadora
                         for col in range(1, len(cols_disp) + 1):
                             cell = ws.cell(row=row, column=col)
                             cell.fill = sep_fill
                             cell.border = border
-                            if col == 1: # Escribimos el nombre en la primera columna
-                                cell.value = f"LISTADO TALLER: {curr_tech}"
+                            if col == 1: 
+                                cell.value = f"TALLER: {curr_tech} | TOTAL ÓRDENES: {conteo}"
                                 cell.font = black_bold
                         row += 1
                     row += 1
 
-            st.download_button("📥 Descargar Excel con Separadores", output.getvalue(), "Reporte_Repuestos.xlsx")
+            st.download_button("📥 Descargar Excel con Contadores", output.getvalue(), "Reporte_Repuestos_Contador.xlsx")
 
             # Vista previa web
             st.divider()
             for taller in sorted(df_filtrado['Técnico'].unique()):
-                with st.expander(f"📍 Taller: {taller}"):
+                num = len(df_filtrado[df_filtrado['Técnico'] == taller])
+                with st.expander(f"📍 {taller} ({num} órdenes)"):
                     st.table(df_filtrado[df_filtrado['Técnico'] == taller][cols_disp])
         else:
-            st.warning("No hay datos que coincidan con los filtros.")
+            st.warning("No se encontraron datos con los filtros aplicados.")
 
     except Exception as e:
         st.error(f"Error: {e}")
