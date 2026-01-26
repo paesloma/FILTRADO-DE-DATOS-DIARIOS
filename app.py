@@ -2,64 +2,61 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Configuración de la interfaz
-st.set_page_config(page_title="Filtro de Órdenes y Repuestos", layout="wide")
+# Configuración de página
+st.set_page_config(page_title="Gestión de Repuestos", layout="wide")
 
-st.title("📊 Control de Repuestos por Técnico")
-st.markdown("Filtros: Estados **'Proceso/Repuestos'** y **'Solicita Repuestos'** + Columna **'Repuestos'** con datos.")
+st.title("📊 Dashboard de Órdenes y Repuestos")
+st.markdown("Filtros activos: Estado **'Proceso/Repuestos'** o **'Solicita Repuestos'** + Columna **'Repuestos'** con datos.")
 
-# Cargador de archivos
+# Subida de archivo
 uploaded_file = st.file_uploader("Sube tu archivo CSV (ordenes.csv)", type=["csv"])
 
-if uploaded_file:
-    # Leer el archivo (usamos error_bad_lines=False por si hay comas extra en observaciones)
+if uploaded_file is not None:
+    # Leer datos
     df = pd.read_csv(uploaded_file)
     
-    # 1. Limpieza de nombres de columnas (quitar espacios en blanco)
+    # Limpiar espacios en nombres de columnas
     df.columns = df.columns.str.strip()
-    
-    # 2. Definir los parámetros de filtro
+
+    # --- LÓGICA DE FILTRADO ---
+    # 1. Filtrar por los dos estados solicitados
     estados_validos = ["Proceso/Repuestos", "Solicita Repuestos"]
     
-    # Aplicar Filtros:
-    # - Que el estado esté en la lista
-    # - Que la columna Repuestos no sea nula ni esté vacía
-    mask = (df['Estado'].isin(estados_validos)) & (df['Repuestos'].notna()) & (df['Repuestos'].astype(str).str.strip() != "")
-    df_filtrado = df[mask].copy()
+    # 2. Filtrar que la columna 'Repuestos' no esté vacía ni sea nula
+    df_filtrado = df[
+        (df['Estado'].isin(estados_validos)) & 
+        (df['Repuestos'].notna()) & 
+        (df['Repuestos'].astype(str).str.strip() != "")
+    ].copy()
 
     if not df_filtrado.empty:
         # Agrupar por Técnico y contar número de órdenes
-        conteo_tecnicos = df_filtrado.groupby('Técnico')['#Orden'].count().sort_values(ascending=False)
+        resumen = df_filtrado.groupby('Técnico')['#Orden'].count().sort_values(ascending=False)
 
-        # Mostrar métricas rápidas
-        st.metric("Total Órdenes Encontradas", len(df_filtrado))
-
-        # Crear dos columnas para visualización
+        # Visualización en columnas
         col1, col2 = st.columns([1, 1])
 
         with col1:
-            st.subheader("Gráfico de Carga por Técnico")
-            fig, ax = plt.subplots()
-            conteo_tecnicos.plot(kind='bar', ax=ax, color='#1f77b4', edgecolor='black')
+            st.subheader("Gráfico de Órdenes por Técnico")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            resumen.plot(kind='bar', ax=ax, color='#ff4b4b')
             ax.set_ylabel("Cantidad de Órdenes")
             ax.set_xlabel("Técnicos")
-            plt.xticks(rotation=45, ha='right')
             
-            # Añadir etiquetas de número sobre las barras
-            for i, v in enumerate(conteo_tecnicos):
+            # Etiquetas sobre las barras
+            for i, v in enumerate(resumen):
                 ax.text(i, v + 0.1, str(v), ha='center', fontweight='bold')
             
             st.pyplot(fig)
 
         with col2:
             st.subheader("Resumen Numérico")
-            st.write(conteo_tecnicos)
+            st.dataframe(resumen.rename("Total Órdenes"), use_container_width=True)
 
-        # Mostrar la tabla de datos completa al final
         st.divider()
-        st.subheader("📋 Detalle de Órdenes Filtradas")
-        st.dataframe(df_filtrado[['#Orden', 'Técnico', 'Estado', 'Repuestos']], use_container_width=True)
+        st.subheader("📋 Detalle de Datos Filtrados")
+        st.dataframe(df_filtrado[['#Orden', 'Técnico', 'Estado', 'Repuestos', 'Producto']], use_container_width=True)
     else:
-        st.warning("No se encontraron registros que cumplan con los filtros: Estados específicos y repuestos no vacíos.")
+        st.warning("No se encontraron registros que cumplan los criterios.")
 else:
-    st.info("Por favor, sube el archivo CSV para procesar los datos.")
+    st.info("👋 Por favor, carga el archivo CSV extraído de tu base de datos para comenzar.")
