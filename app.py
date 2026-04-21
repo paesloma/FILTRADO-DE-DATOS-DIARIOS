@@ -5,95 +5,74 @@ from io import BytesIO
 
 st.set_page_config(page_title="Gestión de Repuestos Pro", layout="wide")
 
-# --- BANNER SUPERIOR ---
-fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+# --- BANNER ---
 st.markdown(f"""
-    <style>
-    .main-banner {{
-        background: linear-gradient(90deg, #1F4E78 0%, #2E75B6 100%);
-        padding: 20px;
-        border-radius: 15px;
-        color: white;
-        text-align: center;
-        margin-bottom: 20px;
-    }}
-    </style>
-    <div class="main-banner">
-        <h1>🛠️ DASHBOARD DE GESTIÓN DE REPUESTOS</h1>
-        <p>Reporte Consolidado al <b>{fecha_hoy}</b></p>
-    </div>
+    <div style="background: linear-gradient(90deg, #1F4E78 0%, #2E75B6 100%); padding: 20px; border-radius: 15px; color: white; text-align: center;">
+        <h1>🛠️ GESTIÓN DE REPUESTOS</h1>
+        <p>Reporte Consolidado al <b>{datetime.now().strftime("%d/%m/%Y")}</b></p>
+    </div><br>
     """, unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("Sube el archivo de órdenes", type=["xls", "xlsx", "csv"])
+uploaded_file = st.file_uploader("Sube el archivo", type=["xls", "xlsx", "csv"])
 
 if uploaded_file is not None:
     try:
-        # 1. LECTURA DE DATOS
+        # 1. CARGA AUTOMÁTICA
         if uploaded_file.name.endswith(('.xls', '.xlsx')):
             df = pd.read_excel(uploaded_file)
         else:
+            # Detecta automáticamente si usa coma o punto y coma
             df = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='latin-1')
 
         df.columns = df.columns.str.strip()
         
-        # 2. VALIDACIÓN Y FILTRADO
-        columnas_req = ['Estado', 'Técnico', 'Repuestos']
-        if not all(col in df.columns for col in columnas_req):
-            st.error(f"Faltan columnas necesarias. El archivo debe tener: {columnas_req}")
-            st.stop()
-
+        # 2. FILTROS FIJOS (Según tu lógica)
         cond_solicita = df['Estado'].str.contains('Solicita', case=False, na=False)
         es_proceso = df['Estado'].str.contains('Proceso/Repuestos', case=False, na=False)
-        tiene_repuestos = df['Repuestos'].astype(str).str.strip().apply(lambda x: len(x) > 2 and x.lower() != 'nan')
+        tiene_repuestos = df['Repuestos'].astype(str).str.strip().apply(lambda x: len(str(x)) > 2 and str(x).lower() != 'nan')
         
         patron_excluir = r'^GO|STDIGICENT|STBMDIGI|TCLCUE|TCLCUENC'
+        
         mask_estado = cond_solicita | (es_proceso & tiene_repuestos)
         mask_tecnico = ~df['Técnico'].str.upper().str.contains(patron_excluir, na=False, regex=True)
         
-        df_base = df[mask_estado & mask_tecnico].copy()
-
-        # 3. SEGMENTACIÓN EN LA INTERFAZ
-        st.sidebar.header("⚙️ Segmentación")
-        tecnicos_disponibles = sorted(df_base['Técnico'].dropna().unique())
-        tecnicos_sel = st.sidebar.multiselect("Filtrar Talleres", tecnicos_disponibles, default=tecnicos_disponibles)
-        
-        df_filtrado = df_base[df_base['Técnico'].isin(tecnicos_sel)].sort_values(by='Técnico')
+        df_filtrado = df[mask_estado & mask_tecnico].copy()
 
         if not df_filtrado.empty:
-            # MÉTRICAS Y GRÁFICOS WEB
-            m1, m2, m3 = st.columns(3)
-            m1.metric("📦 Órdenes", len(df_filtrado))
-            m2.metric("🧑‍🔧 Talleres Activos", df_filtrado['Técnico'].nunique())
-            m3.metric("🚩 Mayor carga", df_filtrado['Técnico'].value_counts().idxmax())
-
-            st.write("### 📊 Volumen de Órdenes")
-            st.bar_chart(df_filtrado['Técnico'].value_counts())
-
-            # 4. PREPARACIÓN DE EXCEL EXCLUSIVAMENTE CON DATOS
-            df_filtrado['Enviado'] = "[  ]" 
-            columnas_finales = ['Enviado', '#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Producto', 'Repuestos']
-            cols_disp = [c for c in columnas_finales if c in df_filtrado.columns or c == 'Enviado']
+            # 3. SEGMENTACIÓN POR TALLER (SIDEBAR)
+            st.sidebar.header("Filtros")
+            talleres = sorted(df_filtrado['Técnico'].unique())
+            seleccion = st.sidebar.multiselect("Seleccionar Talleres", talleres, default=talleres)
             
-            df_export = df_filtrado[cols_disp]
-            
-            # Exportación con motor por defecto de Pandas (sin OpenPyXL)
+            df_final = df_filtrado[df_filtrado['Técnico'].isin(seleccion)].sort_values('Técnico')
+
+            # 4. PREPARAR COLUMNAS PARA INGRESO DE DATOS
+            df_final['Enviado'] = "[  ]"
+            columnas = ['Enviado', '#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Producto', 'Repuestos']
+            # Solo mostramos las que existen en tu archivo
+            cols_ok = [c for c in columnas if c in df_final.columns or c == 'Enviado']
+            df_final = df_final[cols_ok]
+
+            # MÉTRICAS
+            st.metric("Total Órdenes Filtradas", len(df_final))
+
+            # 5. DESCARGA EXCEL (DATOS PUROS)
             output = BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_export.to_excel(writer, index=False, sheet_name='Datos_Limpios')
-
+                df_final.to_excel(writer, index=False, sheet_name='Repuestos')
+            
             st.download_button(
-                label="📥 Descargar Base de Datos Limpia",
+                label="📥 DESCARGAR EXCEL DE DATOS",
                 data=output.getvalue(),
-                file_name=f"Base_Repuestos_{fecha_hoy.replace('/','-')}.xlsx",
+                file_name="reporte_repuestos.xlsx",
                 use_container_width=True
             )
 
-            # VISTA WEB
-            st.write("### 📋 Vista Previa de la Matriz")
-            st.dataframe(df_export, hide_index=True)
+            # VISTA PREVIA
+            st.dataframe(df_final, hide_index=True, use_container_width=True)
 
         else:
-            st.warning("No hay datos para los filtros seleccionados.")
+            st.warning("No hay datos que coincidan con los filtros de Repuestos.")
 
     except Exception as e:
-        st.error(f"Error al procesar el archivo: {e}")
+        st.error(f"Error: {e}")
