@@ -8,8 +8,8 @@ st.set_page_config(page_title="Gestión de Repuestos - Desplegable", layout="wid
 # --- BANNER ---
 st.markdown(f"""
     <div style="background: linear-gradient(90deg, #1F4E78 0%, #2E75B6 100%); padding: 20px; border-radius: 15px; color: white; text-align: center; margin-bottom: 20px;">
-        <h1 style="margin:0;">🛠️ CONSOLIDADOR: LISTADO DESPLEGABLE</h1>
-        <p style="margin:0;">Agrupación vertical por talleres - <b>{datetime.now().strftime("%d/%m/%Y")}</b></p>
+        <h1 style="margin:0;">🛠️ REPUESTOS PENDIENTES </h1>
+        <p style="margin:0;">TALLERES PENDIENTES - <b>{datetime.now().strftime("%d/%m/%Y")}</b></p>
     </div>
     """, unsafe_allow_html=True)
 
