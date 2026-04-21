@@ -1,15 +1,15 @@
 import streamlit as st
-import pd as pd
+import pandas as pd
 from datetime import datetime
 from io import BytesIO
 
 st.set_page_config(page_title="Consolidador Pro - Gestión Repuestos", layout="wide")
 
-# --- BANNER PRINCIPAL ---
+# --- ESTILO Y BANNER ---
 st.markdown(f"""
     <div style="background: linear-gradient(90deg, #1F4E78 0%, #2E75B6 100%); padding: 20px; border-radius: 15px; color: white; text-align: center; margin-bottom: 20px;">
-        <h1 style="margin:0;">🛠️ CONSOLIDADOR DE REPUESTOS</h1>
-        <p style="margin:0;">Control de Procesados y Filtros Especiales - <b>{datetime.now().strftime("%d/%m/%Y")}</b></p>
+        <h1 style="margin:0;">🛠️ CONTROL DE GESTIÓN DE REPUESTOS</h1>
+        <p style="margin:0;">Checkboxes de Control y Filtros de Exclusión - <b>{datetime.now().strftime("%d/%m/%Y")}</b></p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -29,15 +29,15 @@ if archivos:
             st.error(f"Error al leer {arc.name}: {e}")
 
     if lista_df:
+        # UNIFICAR Y NORMALIZAR
         df_total = pd.concat(lista_df, ignore_index=True)
         df_total.columns = df_total.columns.str.strip()
 
-        # Limpiar y Normalizar
         for col in ['Estado', 'Técnico', 'Repuestos', 'Serie', 'Serie/Artículo', 'Producto']:
             if col in df_total.columns:
                 df_total[col] = df_total[col].fillna('').astype(str).str.strip()
 
-        # 2. FILTROS RIGUROSOS
+        # 2. FILTROS DE PRECISIÓN (PARA LAS 14 ÓRDENES)
         mask_estado = df_total['Estado'].str.contains('Repuestos', case=False, na=False)
         mask_no_envio = ~df_total['Estado'].str.contains('Envio', case=False, na=False)
         mask_no_go = ~df_total['Técnico'].str.upper().str.startswith('GO', na=False)
@@ -46,59 +46,56 @@ if archivos:
         df_filtrado = df_total[mask_estado & mask_no_envio & mask_no_go & mask_con_repuesto].drop_duplicates(subset=['#Orden']).copy()
 
         if not df_filtrado.empty:
-            # --- PANEL DE CONTROL (BARRA LATERAL) ---
-            st.sidebar.header("⚙️ OPCIONES DE VISTA")
+            # --- SIDEBAR: CONTROLES ---
+            st.sidebar.header("⚙️ OPCIONES")
             
-            # Opción Ocultar Televisores
             ocultar_tvs = st.sidebar.checkbox("🚫 Ocultar Televisores / TVs", value=False)
             if ocultar_tvs:
                 df_filtrado = df_filtrado[~df_filtrado['Producto'].str.contains('TELEVISOR|TV', case=False, na=False)]
 
-            # Filtro por Taller
             talleres_finales = sorted(df_filtrado['Técnico'].unique())
             seleccion = st.sidebar.multiselect("Filtrar por Taller", talleres_finales, default=talleres_finales)
             
             df_final = df_filtrado[df_filtrado['Técnico'].isin(seleccion)].sort_values('Técnico')
 
-            # 3. COLUMNAS DE CONTROL (Checkboxes en la tabla)
-            # Añadimos la columna interactiva al dataframe
-            df_final['Procesado/Enviado'] = False
+            # 3. PREPARACIÓN DE COLUMNA INTERACTIVA
+            # Agregamos la columna que servirá de Checkbox
+            df_final.insert(0, 'Pedido Procesado', False)
             
             col_serie = 'Serie' if 'Serie' in df_final.columns else 'Serie/Artículo'
-            columnas_vista = ['Procesado/Enviado', '#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Producto', col_serie, 'Repuestos']
+            columnas_vista = ['Pedido Procesado', '#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Producto', col_serie, 'Repuestos']
             
             st.metric("Órdenes para Gestión", len(df_final))
 
-            # 4. TABLA INTERACTIVA CON CHECKBOXES
-            st.write("### 📋 Listado de Control de Repuestos")
-            st.info("Puedes marcar el checkbox en la columna 'Procesado/Enviado' para llevar el control manual.")
+            # 4. TABLA INTERACTIVA (DATA EDITOR)
+            st.write("### 📋 Listado de Control Manual")
+            st.caption("Haz clic en los cuadros de la primera columna para marcar las órdenes ya gestionadas.")
             
-            # Usamos st.data_editor para permitir que los checkboxes sean clicables
             df_editado = st.data_editor(
                 df_final[columnas_vista],
                 hide_index=True,
                 use_container_width=True,
                 column_config={
-                    "Procesado/Enviado": st.column_config.CheckboxColumn(
-                        "Pedido Procesado",
-                        help="Marca si ya gestionaste este pedido",
+                    "Pedido Procesado": st.column_config.CheckboxColumn(
+                        "¿Procesado?",
+                        help="Marca esta casilla si ya enviaste o pediste el repuesto",
                         default=False,
                     )
                 },
-                disabled=[col for col in columnas_vista if col != "Procesado/Enviado"] # Solo el checkbox es editable
+                # Bloqueamos la edición de las demás columnas para seguridad
+                disabled=[col for col in columnas_vista if col != "Pedido Procesado"]
             )
 
-            # 5. DESCARGA DE EXCEL
-            # El excel incluirá el estado de los checkboxes marcados
+            # 5. BOTÓN DE DESCARGA
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_editado.to_excel(writer, index=False, sheet_name='Control_Repuestos')
 
             st.download_button(
-                label="📥 DESCARGAR EXCEL (Incluye estado de Checkboxes)",
+                label="📥 DESCARGAR EXCEL CON MI MARCACIÓN",
                 data=output.getvalue(),
                 file_name=f"Control_Repuestos_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 use_container_width=True
             )
         else:
-            st.warning("No hay órdenes con los filtros aplicados.")
+            st.warning("No hay órdenes que coincidan con los filtros aplicados.")
