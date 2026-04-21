@@ -21,14 +21,17 @@ if archivo is not None:
         if archivo.name.endswith(('.xls', '.xlsx')):
             df = pd.read_excel(archivo)
         else:
-            # engine='python' y sep=None detectan si es coma o punto y coma automáticamente
             df = pd.read_csv(archivo, sep=None, engine='python', encoding='latin-1')
 
         # Limpiar nombres de columnas
         df.columns = df.columns.str.strip()
         
-        # 2. LÓGICA DE FILTRADO (Basada en tus reglas)
-        # Filtro de estados
+        # --- LA SOLUCIÓN: Limpiar espacios ocultos dentro de las celdas ---
+        if 'Técnico' in df.columns:
+            df['Técnico'] = df['Técnico'].astype(str).str.strip()
+        # ------------------------------------------------------------------
+
+        # 2. LÓGICA DE FILTRADO
         mask_solicita = df['Estado'].str.contains('Solicita', case=False, na=False)
         mask_proceso = (df['Estado'].str.contains('Proceso/Repuestos', case=False, na=False)) & \
                        (df['Repuestos'].astype(str).str.len() > 2)
@@ -53,7 +56,6 @@ if archivo is not None:
             df_final['Enviado'] = "[  ]"
             columnas_ordenadas = ['Enviado', '#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Producto', 'Repuestos']
             
-            # Filtrar solo columnas que existan realmente en el archivo original + 'Enviado'
             cols_finales = [c for c in columnas_ordenadas if c in df_final.columns or c == 'Enviado']
             df_final = df_final[cols_finales]
 
