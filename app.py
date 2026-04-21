@@ -3,13 +3,13 @@ import pandas as pd
 from datetime import datetime
 from io import BytesIO
 
-st.set_page_config(page_title="Consolidador Pro - Gestión Repuestos", layout="wide")
+st.set_page_config(page_title="Consolidador por Talleres", layout="wide")
 
-# --- ESTILO Y BANNER ---
+# --- BANNER PRINCIPAL ---
 st.markdown(f"""
     <div style="background: linear-gradient(90deg, #1F4E78 0%, #2E75B6 100%); padding: 20px; border-radius: 15px; color: white; text-align: center; margin-bottom: 20px;">
-        <h1 style="margin:0;">🛠️ CONTROL DE GESTIÓN DE REPUESTOS</h1>
-        <p style="margin:0;">Checkboxes de Control y Filtros de Exclusión - <b>{datetime.now().strftime("%d/%m/%Y")}</b></p>
+        <h1 style="margin:0;">🛠️ GESTIÓN DE REPUESTOS POR TALLER</h1>
+        <p style="margin:0;">Control interactivo y segmentación por centros de servicio - <b>{datetime.now().strftime("%d/%m/%Y")}</b></p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -29,73 +29,91 @@ if archivos:
             st.error(f"Error al leer {arc.name}: {e}")
 
     if lista_df:
-        # UNIFICAR Y NORMALIZAR
+        # UNIFICAR Y NORMALIZAR COLUMNAS
         df_total = pd.concat(lista_df, ignore_index=True)
         df_total.columns = df_total.columns.str.strip()
 
+        # Limpiar datos nulos
         for col in ['Estado', 'Técnico', 'Repuestos', 'Serie', 'Serie/Artículo', 'Producto']:
             if col in df_total.columns:
                 df_total[col] = df_total[col].fillna('').astype(str).str.strip()
 
-        # 2. FILTROS DE PRECISIÓN (PARA LAS 14 ÓRDENES)
+        # 2. FILTROS ESTRICTOS (PARA LLEGAR A LAS 14 ÓRDENES)
+        # Estados que contienen 'Repuestos' pero NO 'Envio'
         mask_estado = df_total['Estado'].str.contains('Repuestos', case=False, na=False)
         mask_no_envio = ~df_total['Estado'].str.contains('Envio', case=False, na=False)
-        mask_no_go = ~df_total['Técnico'].str.upper().str.startswith('GO', na=False)
-        mask_con_repuesto = df_total['Repuestos'].str.len() > 0
         
-        df_filtrado = df_total[mask_estado & mask_no_envio & mask_no_go & mask_con_repuesto].drop_duplicates(subset=['#Orden']).copy()
+        # Exclusión de técnicos que empiezan con "GO"
+        mask_no_go = ~df_total['Técnico'].str.upper().str.startswith('GO', na=False)
+        
+        # Solo órdenes que tienen texto en el campo Repuestos
+        mask_con_texto = df_total['Repuestos'].str.len() > 0
+        
+        # Aplicar filtros y eliminar duplicados por número de orden
+        df_filtrado = df_total[mask_estado & mask_no_envio & mask_no_go & mask_con_texto].drop_duplicates(subset=['#Orden']).copy()
 
         if not df_filtrado.empty:
-            # --- SIDEBAR: CONTROLES ---
-            st.sidebar.header("⚙️ OPCIONES")
+            # --- BARRA LATERAL (FILTROS ADICIONALES) ---
+            st.sidebar.header("⚙️ OPCIONES DE FILTRADO")
             
+            # Botón para ocultar Televisores
             ocultar_tvs = st.sidebar.checkbox("🚫 Ocultar Televisores / TVs", value=False)
             if ocultar_tvs:
                 df_filtrado = df_filtrado[~df_filtrado['Producto'].str.contains('TELEVISOR|TV', case=False, na=False)]
 
-            talleres_finales = sorted(df_filtrado['Técnico'].unique())
-            seleccion = st.sidebar.multiselect("Filtrar por Taller", talleres_finales, default=talleres_finales)
+            # Lista de talleres para segmentar
+            talleres_detectados = sorted(df_filtrado['Técnico'].unique())
+            seleccion_talleres = st.sidebar.multiselect("Talleres a mostrar", talleres_detectados, default=talleres_detectados)
             
-            df_final = df_filtrado[df_filtrado['Técnico'].isin(seleccion)].sort_values('Técnico')
-
-            # 3. PREPARACIÓN DE COLUMNA INTERACTIVA
-            # Agregamos la columna que servirá de Checkbox
-            df_final.insert(0, 'Pedido Procesado', False)
+            # Filtrado final por selección de talleres
+            df_final = df_filtrado[df_filtrado['Técnico'].isin(seleccion_talleres)].sort_values(['Técnico', 'Fecha'])
             
+            # Agregar columna de Checkbox interactivo
+            df_final.insert(0, 'Procesado', False)
+            
+            # Definir columna de Serie
             col_serie = 'Serie' if 'Serie' in df_final.columns else 'Serie/Artículo'
-            columnas_vista = ['Pedido Procesado', '#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Producto', col_serie, 'Repuestos']
-            
-            st.metric("Órdenes para Gestión", len(df_final))
+            columnas_vista = ['Procesado', '#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Producto', col_serie, 'Repuestos']
 
-            # 4. TABLA INTERACTIVA (DATA EDITOR)
-            st.write("### 📋 Listado de Control Manual")
-            st.caption("Haz clic en los cuadros de la primera columna para marcar las órdenes ya gestionadas.")
-            
-            df_editado = st.data_editor(
-                df_final[columnas_vista],
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "Pedido Procesado": st.column_config.CheckboxColumn(
-                        "¿Procesado?",
-                        help="Marca esta casilla si ya enviaste o pediste el repuesto",
-                        default=False,
-                    )
-                },
-                # Bloqueamos la edición de las demás columnas para seguridad
-                disabled=[col for col in columnas_vista if col != "Pedido Procesado"]
-            )
+            st.metric("Total Órdenes Únicas", len(df_final))
 
-            # 5. BOTÓN DE DESCARGA
+            # 3. AGRUPACIÓN POR TALLERES (VISTA EN PESTAÑAS)
+            st.write("### 📋 Órdenes Agrupadas por Taller")
+            
+            if seleccion_talleres:
+                # Crear una pestaña por cada taller
+                tabs = st.tabs([f"📍 {t}" for t in seleccion_talleres])
+                
+                # Diccionario para guardar los cambios de los editores
+                for i, taller in enumerate(seleccion_talleres):
+                    with tabs[i]:
+                        df_taller = df_final[df_final['Técnico'] == taller]
+                        if not df_taller.empty:
+                            st.data_editor(
+                                df_taller[columnas_vista],
+                                key=f"editor_{taller}",
+                                hide_index=True,
+                                use_container_width=True,
+                                column_config={
+                                    "Procesado": st.column_config.CheckboxColumn("¿Listo?", default=False)
+                                },
+                                disabled=[col for col in columnas_vista if col != "Procesado"]
+                            )
+                        else:
+                            st.info("No hay órdenes pendientes para este taller.")
+
+            # 4. BOTÓN DE DESCARGA
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_editado.to_excel(writer, index=False, sheet_name='Control_Repuestos')
+                # Guardar cada taller en una hoja diferente de Excel
+                for taller, grupo in df_final.groupby('Técnico'):
+                    grupo[columnas_vista].to_excel(writer, index=False, sheet_name=taller[:30])
 
             st.download_button(
-                label="📥 DESCARGAR EXCEL CON MI MARCACIÓN",
+                label="📥 DESCARGAR EXCEL AGRUPADO POR TALLER",
                 data=output.getvalue(),
-                file_name=f"Control_Repuestos_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                file_name=f"Reporte_Repuestos_Talleres_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 use_container_width=True
             )
         else:
-            st.warning("No hay órdenes que coincidan con los filtros aplicados.")
+            st.warning("No se encontraron órdenes con los criterios aplicados.")
