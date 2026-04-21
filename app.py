@@ -3,13 +3,13 @@ import pandas as pd
 from datetime import datetime
 from io import BytesIO
 
-st.set_page_config(page_title="Consolidador por Talleres", layout="wide")
+st.set_page_config(page_title="Consolidador Total", layout="wide")
 
 # --- BANNER ---
 st.markdown(f"""
     <div style="background: linear-gradient(90deg, #1F4E78 0%, #2E75B6 100%); padding: 20px; border-radius: 15px; color: white; text-align: center; margin-bottom: 20px;">
-        <h1 style="margin:0;">🛠️ CONSOLIDADOR: AGRUPACIÓN POR TALLERES</h1>
-        <p style="margin:0;">Reporte unificado al <b>{datetime.now().strftime("%d/%m/%Y")}</b></p>
+        <h1 style="margin:0;">🛠️ CONSOLIDADOR: REVISIÓN TOTAL</h1>
+        <p style="margin:0;">Reporte sin restricciones de texto - <b>{datetime.now().strftime("%d/%m/%Y")}</b></p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -28,73 +28,68 @@ if archivos:
             st.error(f"Error en {arc.name}: {e}")
 
     if lista_df:
-        # 1. UNIFICAR Y LIMPIAR
+        # 1. UNIFICAR
         df_total = pd.concat(lista_df, ignore_index=True)
         df_total.columns = df_total.columns.str.strip()
 
-        # Rellenar nulos y limpiar textos
+        # Limpieza de textos y nulos
         cols_limpiar = ['Estado', 'Técnico', 'Repuestos', 'Serie', 'Serie/Artículo']
         for col in cols_limpiar:
             if col in df_total.columns:
                 df_total[col] = df_total[col].fillna('').astype(str).str.strip()
 
-        # 2. FILTRADO DE ESTADOS (Solicita / Proceso)
+        # 2. FILTRADO FLEXIBLE (Sin restricción de caracteres en Repuestos)
+        # Esto asegura que si el estado es "Proceso" o "Solicita", la orden pase SIEMPRE
         mask_estado = df_total['Estado'].str.contains('Solicita|Proceso', case=False, na=False)
-        # Eliminamos duplicados por número de orden para que el conteo de los 14 sea exacto
+        
+        # Eliminamos duplicados por #Orden para no contar dos veces lo mismo entre archivos
         df_filtrado = df_total[mask_estado].drop_duplicates(subset=['#Orden']).copy()
 
         if not df_filtrado.empty:
-            # 3. SEGMENTACIÓN EN INTERFAZ
-            st.sidebar.header("Filtros de Taller")
+            # 3. SEGMENTACIÓN VISUAL
+            st.sidebar.header("Segmentar por Taller")
             todos_talleres = sorted(df_filtrado['Técnico'].unique())
-            seleccionados = st.sidebar.multiselect("Selecciona Talleres", todos_talleres, default=todos_talleres)
+            seleccionados = st.sidebar.multiselect("Talleres detectados", todos_talleres, default=todos_talleres)
             
-            df_segmentado = df_filtrado[df_filtrado['Técnico'].isin(seleccionados)].sort_values('Técnico')
+            df_final = df_filtrado[df_filtrado['Técnico'].isin(seleccionados)].sort_values('Técnico')
 
-            # 4. PREPARACIÓN DE DATOS
-            df_segmentado['Enviado'] = "[  ]"
-            col_serie = 'Serie' if 'Serie' in df_segmentado.columns else 'Serie/Artículo'
-            columnas = ['Enviado', '#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Producto', col_serie, 'Repuestos']
-            cols_ok = [c for c in columnas if c in df_segmentado.columns or c == 'Enviado']
-            
+            # 4. PREPARACIÓN DE COLUMNAS
+            df_final['Enviado'] = "[  ]"
+            col_serie = 'Serie' if 'Serie' in df_final.columns else 'Serie/Artículo'
+            columnas_orden = ['Enviado', '#Orden', 'Fecha', 'Técnico', 'Cliente', 'Estado', 'Producto', col_serie, 'Repuestos']
+            cols_ok = [c for c in columnas_orden if c in df_final.columns or c == 'Enviado']
+
             # MÉTRICAS
-            st.metric("Total Órdenes Únicas", len(df_segmentado))
+            st.metric("Órdenes Únicas Encontradas", len(df_final))
 
-            # 5. GENERAR EXCEL CON FILAS DE AGRUPACIÓN (Separadores)
+            # 5. GENERAR EXCEL AGRUPADO
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                # Creamos una lista para construir el reporte final con separadores
-                datos_con_separador = []
-                
-                for taller, grupo in df_segmentado.groupby('Técnico'):
-                    # Añadir fila de encabezado de Taller
+                datos_reporte = []
+                for taller, grupo in df_final.groupby('Técnico'):
+                    # Fila de Taller
                     separador = {c: '' for c in cols_ok}
                     separador['Enviado'] = f"📍 TALLER: {taller.upper()}"
-                    datos_con_separador.append(separador)
-                    
-                    # Añadir las órdenes de ese taller
-                    datos_con_separador.extend(grupo[cols_ok].to_dict('records'))
-                    
-                    # Añadir fila vacía de respiro
-                    datos_con_separador.append({c: '' for c in cols_ok})
-
-                df_final_excel = pd.DataFrame(datos_con_separador)
-                df_final_excel.to_excel(writer, index=False, sheet_name='Reporte_Agrupado')
+                    datos_reporte.append(separador)
+                    # Datos
+                    datos_reporte.extend(grupo[cols_ok].to_dict('records'))
+                    # Espacio
+                    datos_reporte.append({c: '' for c in cols_ok})
+                
+                pd.DataFrame(datos_reporte).to_excel(writer, index=False, sheet_name='Repuestos')
 
             st.download_button(
-                label="📥 DESCARGAR REPORTE AGRUPADO POR TALLER",
+                label="📥 DESCARGAR REPORTE CON LOS 14 REGISTROS",
                 data=output.getvalue(),
-                file_name=f"Consolidado_Talleres_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                file_name="consolidado_final.xlsx",
                 use_container_width=True
             )
 
-            # VISTA WEB POR EXPANDERS (Segmentación Visual)
-            st.write("### 📋 Vista Detallada por Segmento")
+            # VISTA EN WEB
             for taller in seleccionados:
-                df_taller = df_segmentado[df_segmentado['Técnico'] == taller]
+                df_taller = df_final[df_final['Técnico'] == taller]
                 if not df_taller.empty:
-                    with st.expander(f"Taller: {taller} ({len(df_taller)} órdenes)"):
+                    with st.expander(f"📍 {taller} ({len(df_taller)} órdenes)"):
                         st.dataframe(df_taller[cols_ok], hide_index=True, use_container_width=True)
-
         else:
-            st.warning("No se encontraron órdenes con los estados 'Solicita' o 'Proceso'.")
+            st.warning("No se encontraron órdenes con los estados indicados.")
