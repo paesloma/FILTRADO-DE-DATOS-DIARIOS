@@ -36,13 +36,19 @@ if archivos:
             if col in df_total.columns:
                 df_total[col] = df_total[col].fillna('').astype(str).str.strip()
 
-        # --- FILTROS DE PRECISIÓN (14 ÓRDENES) ---
+        # --- FILTROS DE PRECISIÓN ACTUALIZADOS ---
         mask_estado = df_total['Estado'].str.contains('Repuestos', case=False, na=False)
         mask_no_envio = ~df_total['Estado'].str.contains('Envio', case=False, na=False)
         mask_no_go = ~df_total['Técnico'].str.upper().str.startswith('GO', na=False)
-        mask_con_repuesto = df_total['Repuestos'].str.len() > 0
         
-        df_filtrado = df_total[mask_estado & mask_no_envio & mask_no_go & mask_con_repuesto].drop_duplicates(subset=['#Orden']).copy()
+        # Nueva lógica para repuestos: Tiene texto O (es "solicita repuestos" y está vacío)
+        mask_con_repuesto = df_total['Repuestos'].str.len() > 0
+        mask_solicita_vacio = df_total['Estado'].str.contains('solicita repuestos', case=False, na=False) & (df_total['Repuestos'].str.len() == 0)
+        
+        # Combinación de la máscara final
+        mask_final = mask_estado & mask_no_envio & mask_no_go & (mask_con_repuesto | mask_solicita_vacio)
+
+        df_filtrado = df_total[mask_final].drop_duplicates(subset=['#Orden']).copy()
 
         if not df_filtrado.empty:
             # BARRA LATERAL
